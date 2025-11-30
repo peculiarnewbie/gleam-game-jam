@@ -12,6 +12,7 @@ import lustre/effect as effect_ui
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import pong/levels
 import tiramisu
 import tiramisu/asset
 import tiramisu/background
@@ -63,6 +64,8 @@ pub type Model {
     ball: Ball,
     game: Game,
     load_state: LoadState,
+    camera_type: levels.CameraType,
+    level: levels.Level,
   )
 }
 
@@ -169,6 +172,8 @@ fn init(
       ),
       game: Game(p1_score: 0, p2_score: 0),
       load_state: Loading,
+      level: levels.get_random_level(),
+      camera_type: levels.Static,
     ),
     effect.batch([effect.tick(Tick), load_effect]),
     option.None,
@@ -188,9 +193,15 @@ fn ball_bounce(
   ball_position: vec3.Vec3(Float),
   player_position: vec3.Vec3(Float),
 ) {
-  let #(ax, ay) = #(player_position.x, player_position.z) |> echo
+  let #(ax, ay) = #(player_position.x, player_position.z)
   let #(bx, by) = #(ball_position.x, ball_position.z)
-  let dx = bx -. ax
+  let dx = { bx -. ax } |> float.clamp(-1.0, 1.0)
+  // hack so the ball doesn't go vertical
+  let dx = case dx >. -1.0, dx <. 1.0, dx >. 0.0 {
+    True, True, True -> 1.0
+    True, True, False -> -1.0
+    _, _, _ -> dx
+  }
   let dy = { by -. ay } *. 0.8
 
   let len_sq = dx *. dx +. dy *. dy
@@ -300,7 +311,6 @@ fn update(
         False -> model.ball.velocity
       }
 
-      let new_time = model.time +. ctx.delta_time
       let new_ball_position =
         model.ball.position
         |> vec3.map2(direction, fn(x, y) { x +. y *. model.ball.velocity })
@@ -328,7 +338,10 @@ fn update(
       let intersect_s1 = spatial.collider_intersects(score1_bounds, ball_bounds)
       let intersect_s2 = spatial.collider_intersects(score2_bounds, ball_bounds)
 
-      let #(game, new_ball) = case intersect_s1, intersect_s2 {
+      let #(game, new_ball, new_camera_type, new_time) = case
+        intersect_s1,
+        intersect_s2
+      {
         True, _ -> #(
           Game(model.game.p1_score + 1, model.game.p2_score),
           Ball(
@@ -338,6 +351,8 @@ fn update(
             velocity: 0.2,
             rotation: 0.0,
           ),
+          levels.get_camera_type(model.camera_type),
+          0.0,
         )
         _, True -> #(
           Game(model.game.p1_score, model.game.p2_score + 1),
@@ -348,8 +363,15 @@ fn update(
             velocity: 0.2,
             rotation: 0.0,
           ),
+          levels.get_camera_type(model.camera_type),
+          0.0,
         )
-        _, _ -> #(model.game, new_ball)
+        _, _ -> #(
+          model.game,
+          new_ball,
+          model.camera_type,
+          model.time +. ctx.delta_time,
+        )
       }
 
       #(
@@ -360,6 +382,7 @@ fn update(
           p2: new_p2,
           ball: new_ball,
           game:,
+          camera_type: new_camera_type,
         ),
         effect.batch([
           effect.tick(Tick),
@@ -394,27 +417,11 @@ fn update(
   }
 }
 
-pub type Id {
-  Scene
-  MainCamera
-  Ambient
-  Directional
-  LoadingCube
-  ErrorCube
-  GltfModel
-}
-
 fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
   let assert Ok(cam) =
-    camera.perspective(field_of_view: 75.0, near: 0.1, far: 1000.0)
-  let assert Ok(sphere_geom) =
-    geometry.sphere(radius: 0.5, width_segments: 32, height_segments: 32)
+    camera.perspective(field_of_view: 95.0, near: 0.1, far: 1000.0)
   let assert Ok(sphere_mat) =
     material.new() |> material.with_color(0x0066ff) |> material.build
-  let assert Ok(ground_geom) = geometry.plane(width: 20.0, height: 20.0)
-  let assert Ok(ground_mat) =
-    material.new() |> material.with_color(0x808080) |> material.build
-  let assert Ok(player_geom) = geometry.box(width: 1.0, height: 1.0, depth: 5.0)
   let assert Ok(player1_mat) =
     material.new() |> material.with_color(0x448080) |> material.build
   let assert Ok(player2_mat) =
@@ -491,27 +498,20 @@ fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
             )),
           animation: option.None,
           physics: option.None,
-          // material: option.Some({
-          //   let assert Ok(material) =
-          //     material.new()
-          //     |> material.with_metalness(0.5)
-          //     |> material.with_roughness(0.5)
-          //     |> material.build()
-          //   material
-          // }),
           material: option.None,
         )
       model_node
     }
   }
 
+  let cam_transform = levels.get_camera(model.camera_type, model.time)
+
   scene.empty(id: "Scene", transform: transform.identity, children: [
     scene.camera(
       id: "camera",
       camera: cam,
-      transform: transform.at(position: vec3.Vec3(0.0, 15.0, 10.0))
-        |> transform.with_euler_rotation(vec3.Vec3(0.0, 0.0, 0.0)),
-      look_at: option.Some(vec3.Vec3(0.0, maths.sin(model.time /. 1000.0), 0.0)),
+      transform: cam_transform,
+      look_at: option.None,
       active: True,
       viewport: option.None,
       postprocessing: option.None,
@@ -554,7 +554,7 @@ fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
     // ),
     scene.mesh(
       id: "p1",
-      geometry: player_geom,
+      geometry: model.level.player_geom,
       material: player1_mat,
       transform: transform.at(position: vec3.Vec3(
         -10.0,
@@ -565,7 +565,7 @@ fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
     ),
     scene.mesh(
       id: "p2",
-      geometry: player_geom,
+      geometry: model.level.player_geom,
       material: player2_mat,
       transform: transform.at(position: vec3.Vec3(
         10.0,

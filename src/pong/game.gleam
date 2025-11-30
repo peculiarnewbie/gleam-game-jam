@@ -16,4 +16,5 @@ pub type Msg {
   LoadingFailed(asset.LoadError)
   PlaySingle
   PlayMulti
+  Restart
 }

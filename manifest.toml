@@ -25,6 +25,7 @@ packages = [
   { name = "gleeunit", version = "1.9.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "DA9553CE58B67924B3C631F96FE3370C49EB6D6DC6B384EC4862CC4AAA718F3C" },
   { name = "glint", version = "1.2.1", build_tools = ["gleam"], requirements = ["gleam_community_ansi", "gleam_community_colour", "gleam_stdlib", "snag"], otp_app = "glint", source = "hex", outer_checksum = "2214C7CEFDE457CEE62140C3D4899B964E05236DA74E4243DFADF4AF29C382BB" },
   { name = "glisten", version = "8.0.1", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_otp", "gleam_stdlib", "logging", "telemetry"], otp_app = "glisten", source = "hex", outer_checksum = "534BB27C71FB9E506345A767C0D76B17A9E9199934340C975DC003C710E3692D" },
+  { name = "glor", version = "1.0.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "glor", source = "hex", outer_checksum = "CB94E9DDB5ABF5A09899055FD8F88C16EDFC072DCCBCB9D4BA81E14AD3109EF8" },
   { name = "gramps", version = "6.0.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_erlang", "gleam_http", "gleam_stdlib"], otp_app = "gramps", source = "hex", outer_checksum = "8B7195978FBFD30B43DF791A8A272041B81E45D245314D7A41FC57237AA882A0" },
   { name = "group_registry", version = "1.0.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_otp", "gleam_stdlib"], otp_app = "group_registry", source = "hex", outer_checksum = "BC798A53D6F2406DB94E27CB45C57052CB56B32ACF7CC16EA20F6BAEC7E36B90" },
   { name = "houdini", version = "1.2.0", build_tools = ["gleam"], requirements = [], otp_app = "houdini", source = "hex", outer_checksum = "5DB1053F1AF828049C2B206D4403C18970ABEF5C18671CA3C2D2ED0DD64F6385" },
@@ -55,11 +56,12 @@ packages = [
 ]
 
 [requirements]
+gleam_community_maths = { version = ">= 2.0.0 and < 3.0.0" }
 gleam_stdlib = { version = ">= 0.44.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
+glor = { version = ">= 1.0.0 and < 2.0.0" }
+lustre = { version = ">= 5.4.0 and < 6.0.0" }
 lustre_dev_tools = { version = ">= 2.3.1 and < 3.0.0" }
 mascarpone = { version = ">= 2.1.0 and < 3.0.0" }
 tiramisu = { version = ">= 6.0.1 and < 7.0.0" }
 vec = { version = ">= 3.0.1 and < 4.0.0" }
-lustre = { version = ">= 5.4.0 and < 6.0.0" }
-gleam_community_maths = { version = ">= 2.0.0 and < 3.0.0" }

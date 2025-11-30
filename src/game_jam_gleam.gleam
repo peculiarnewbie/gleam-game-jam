@@ -6,6 +6,7 @@ import gleam/javascript/promise
 import gleam/list
 import gleam/option
 import gleam_community/maths
+import glor
 import lustre
 import lustre/event
 import pong/game
@@ -113,7 +114,7 @@ fn init(
     Model(
       time: 0.0,
       p1: Player(id: P1, position: 0.0, speed: 1.0),
-      p2: Player(id: P2, position: 0.0, speed: 0.5),
+      p2: Player(id: P2, position: 0.0, speed: 0.3),
       ball: Ball(
         position: vec3.Vec3(0.0, 0.0, 0.0),
         rotation: 0.0,
@@ -147,6 +148,8 @@ fn ball_bounce(
   ball_position: vec3.Vec3(Float),
   player_position: vec3.Vec3(Float),
 ) {
+  let player = glor.new("hit.mp3")
+  glor.play(player)
   let #(ax, ay) = #(player_position.x, player_position.z)
   let #(bx, by) = #(ball_position.x, ball_position.z)
   let dx = { bx -. ax } |> float.clamp(-1.0, 1.0)
@@ -265,8 +268,11 @@ fn update(
             False, False -> {
               model.ball.direction
             }
-            _, _ ->
+            _, _ -> {
+              let tap = glor.new("tap.mp3")
+              glor.play(tap)
               model.ball.direction |> vec3.map_z(fn(z) { 0.0 -. z }) |> echo
+            }
           }
 
           #(model.ball.owner, dir, False)
@@ -305,34 +311,41 @@ fn update(
       let intersect_s1 = spatial.collider_intersects(score1_bounds, ball_bounds)
       let intersect_s2 = spatial.collider_intersects(score2_bounds, ball_bounds)
 
+      let score = glor.new("score.mp3")
       let #(game, new_ball, new_camera_type, new_time) = case
         intersect_s1,
         intersect_s2
       {
-        True, _ -> #(
-          game.Game(model.game.p1_score + 1, model.game.p2_score),
-          Ball(
-            owner: P2,
-            direction: vec3.Vec3(-1.0, 0.0, 0.0),
-            position: vec3.Vec3(0.0, 0.0, 0.0),
-            velocity: 0.2,
-            rotation: 0.0,
-          ),
-          levels.get_camera_type(model.camera_type),
-          0.0,
-        )
-        _, True -> #(
-          game.Game(model.game.p1_score, model.game.p2_score + 1),
-          Ball(
-            owner: P1,
-            direction: vec3.Vec3(1.0, 0.0, 0.0),
-            position: vec3.Vec3(0.0, 0.0, 0.0),
-            velocity: 0.2,
-            rotation: 0.0,
-          ),
-          levels.get_camera_type(model.camera_type),
-          0.0,
-        )
+        True, _ -> {
+          glor.play(score)
+          #(
+            game.Game(model.game.p1_score + 1, model.game.p2_score),
+            Ball(
+              owner: P2,
+              direction: vec3.Vec3(-1.0, 0.0, 0.0),
+              position: vec3.Vec3(0.0, 0.0, 0.0),
+              velocity: 0.2,
+              rotation: 0.0,
+            ),
+            levels.get_camera_type(model.camera_type),
+            0.0,
+          )
+        }
+        _, True -> {
+          glor.play(score)
+          #(
+            game.Game(model.game.p1_score, model.game.p2_score + 1),
+            Ball(
+              owner: P1,
+              direction: vec3.Vec3(1.0, 0.0, 0.0),
+              position: vec3.Vec3(0.0, 0.0, 0.0),
+              velocity: 0.2,
+              rotation: 0.0,
+            ),
+            levels.get_camera_type(model.camera_type),
+            0.0,
+          )
+        }
         _, _ -> #(
           model.game,
           new_ball,
@@ -341,23 +354,28 @@ fn update(
         )
       }
 
-      #(
-        Model(
-          ..model,
-          time: new_time,
-          p1: new_p1,
-          p2: new_p2,
-          ball: new_ball,
-          game:,
-          camera_type: new_camera_type,
-        ),
-        effect.batch([
-          effect.tick(game.Tick),
-          ui.dispatch(game.Game(game.p1_score, game.p2_score)),
-        ]),
-        option.None,
-      )
+      case model.game.p1_score, model.game.p2_score {
+        5, _ -> #(model, ui.finish(), option.None)
+        _, 5 -> #(model, ui.finish(), option.None)
+        _, _ -> #(
+          Model(
+            ..model,
+            time: new_time,
+            p1: new_p1,
+            p2: new_p2,
+            ball: new_ball,
+            game:,
+            camera_type: new_camera_type,
+          ),
+          effect.batch([
+            effect.tick(game.Tick),
+            ui.dispatch(game.Game(game.p1_score, game.p2_score)),
+          ]),
+          option.None,
+        )
+      }
     }
+
     game.ModelLoaded(data) -> {
       let animation_count = data.animations |> list.length()
       io.println(
@@ -392,8 +410,27 @@ fn update(
 
     game.PlayMulti -> {
       #(
-        Model(..model, state: game.Playing, mode: Multi),
+        Model(
+          ..model,
+          state: game.Playing,
+          mode: Multi,
+          p2: Player(id: P2, position: 0.0, speed: 1.0),
+        ),
         effect.tick(game.Tick),
+        option.None,
+      )
+    }
+
+    game.Restart -> {
+      #(
+        Model(
+          ..model,
+          game: game.Game(0, 0),
+          state: game.Start,
+          mode: Single,
+          p2: Player(id: P2, position: 0.0, speed: 0.5),
+        ),
+        effect.none(),
         option.None,
       )
     }

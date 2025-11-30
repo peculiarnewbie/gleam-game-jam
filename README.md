@@ -4,21 +4,6 @@
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/game_jam_gleam/)
 
 ```sh
-gleam add game_jam_gleam@1
+gleam run -m lustre/dev start
 ```
-```gleam
-import game_jam_gleam
-
-pub fn main() -> Nil {
-  // TODO: An example of the project in use
-}
-```
-
-Further documentation can be found at <https://hexdocs.pm/game_jam_gleam>.
-
-## Development
-
-```sh
-gleam run   # Run the project
-gleam test  # Run the tests
-```
+play [here](https://gleam-pong.peculiarnewbie.com/)

@@ -2,6 +2,8 @@
 import gleam/float
 import gleam/int
 import gleam/io
+import gleam/javascript/promise
+import gleam/list
 import gleam/option
 import gleam_community/maths
 import lustre
@@ -11,6 +13,7 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import tiramisu
+import tiramisu/asset
 import tiramisu/background
 import tiramisu/camera
 import tiramisu/effect.{type Effect}
@@ -42,6 +45,7 @@ pub type Ball {
   Ball(
     position: vec3.Vec3(Float),
     velocity: Float,
+    rotation: Float,
     direction: vec3.Vec3(Float),
     owner: PlayerID,
   )
@@ -52,16 +56,31 @@ pub type Game {
 }
 
 pub type Model {
-  Model(time: Float, p1: Player, p2: Player, ball: Ball, game: Game)
+  Model(
+    time: Float,
+    p1: Player,
+    p2: Player,
+    ball: Ball,
+    game: Game,
+    load_state: LoadState,
+  )
 }
 
 pub type Msg {
   Tick
+  ModelLoaded(asset.FBXData)
+  LoadingFailed(asset.LoadError)
 }
 
 pub type Action {
   P1Move
   P2Move
+}
+
+pub type LoadState {
+  Loading
+  Loaded(asset.FBXData)
+  Failed(String)
 }
 
 pub type UIModel {
@@ -125,6 +144,17 @@ fn init(
   _ctx: tiramisu.Context(String),
 ) -> #(Model, Effect(Msg), option.Option(_)) {
   // Insert enemies
+  //
+  let load_effect =
+    effect.from_promise(
+      promise.map(asset.load_fbx("lucy.fbx", ""), fn(result) {
+        case result {
+          Ok(data) -> ModelLoaded(data)
+          Error(error) -> LoadingFailed(error)
+        }
+      }),
+    )
+
   #(
     Model(
       time: 0.0,
@@ -132,13 +162,15 @@ fn init(
       p2: Player(id: P2, position: 0.0, speed: 1.0),
       ball: Ball(
         position: vec3.Vec3(0.0, 0.0, 0.0),
+        rotation: 0.0,
         velocity: 0.2,
         direction: vec3.Vec3(1.0, 0.0, 0.0),
         owner: P1,
       ),
       game: Game(p1_score: 0, p2_score: 0),
+      load_state: Loading,
     ),
-    effect.tick(Tick),
+    effect.batch([effect.tick(Tick), load_effect]),
     option.None,
   )
 }
@@ -159,7 +191,7 @@ fn ball_bounce(
   let #(ax, ay) = #(player_position.x, player_position.z) |> echo
   let #(bx, by) = #(ball_position.x, ball_position.z)
   let dx = bx -. ax
-  let dy = by -. ay
+  let dy = { by -. ay } *. 0.8
 
   let len_sq = dx *. dx +. dy *. dy
   case float.square_root(len_sq) {
@@ -237,12 +269,12 @@ fn update(
       {
         _, True, P1 -> #(
           P2,
-          ball_bounce(model.ball.position, p2_position) |> echo,
+          ball_bounce(model.ball.position, p2_position),
           True,
         )
         True, _, P2 -> #(
           P1,
-          ball_bounce(model.ball.position, p1_position) |> echo,
+          ball_bounce(model.ball.position, p1_position),
           True,
         )
         _, _, _ -> {
@@ -272,8 +304,16 @@ fn update(
       let new_ball_position =
         model.ball.position
         |> vec3.map2(direction, fn(x, y) { x +. y *. model.ball.velocity })
+      let rotation = model.ball.rotation +. 0.1 *. velocity
+
       let new_ball =
-        Ball(owner:, direction:, position: new_ball_position, velocity:)
+        Ball(
+          owner:,
+          velocity:,
+          direction:,
+          position: new_ball_position,
+          rotation:,
+        )
 
       let score1_pos = vec3.Vec3(14.0, 0.0, 0.0)
       let score1_bounds =
@@ -296,6 +336,7 @@ fn update(
             direction: vec3.Vec3(-1.0, 0.0, 0.0),
             position: vec3.Vec3(0.0, 0.0, 0.0),
             velocity: 0.2,
+            rotation: 0.0,
           ),
         )
         _, True -> #(
@@ -305,13 +346,21 @@ fn update(
             direction: vec3.Vec3(1.0, 0.0, 0.0),
             position: vec3.Vec3(0.0, 0.0, 0.0),
             velocity: 0.2,
+            rotation: 0.0,
           ),
         )
         _, _ -> #(model.game, new_ball)
       }
 
       #(
-        Model(time: new_time, p1: new_p1, p2: new_p2, ball: new_ball, game:),
+        Model(
+          ..model,
+          time: new_time,
+          p1: new_p1,
+          p2: new_p2,
+          ball: new_ball,
+          game:,
+        ),
         effect.batch([
           effect.tick(Tick),
           ui.dispatch_to_lustre(UpdateScore(game.p1_score, game.p2_score)),
@@ -319,7 +368,40 @@ fn update(
         option.None,
       )
     }
+    ModelLoaded(data) -> {
+      let animation_count = data.animations |> list.length()
+      io.println(
+        "Loaded GLTF model with "
+        <> int.to_string(animation_count)
+        <> " animations",
+      )
+      #(Model(..model, load_state: Loaded(data)), effect.none(), option.None)
+    }
+
+    LoadingFailed(error) -> {
+      let error_msg = case error {
+        asset.LoadError(msg) -> "Load error: " <> msg
+        asset.InvalidUrl(url) -> "Invalid URL: " <> url
+        asset.ParseError(msg) -> "Parse error: " <> msg
+      }
+      io.println("Failed to load model: " <> error_msg)
+      #(
+        Model(..model, load_state: Failed(error_msg)),
+        effect.none(),
+        option.None,
+      )
+    }
   }
+}
+
+pub type Id {
+  Scene
+  MainCamera
+  Ambient
+  Directional
+  LoadingCube
+  ErrorCube
+  GltfModel
 }
 
 fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
@@ -340,6 +422,89 @@ fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
 
   let assert Ok(wall_geom) = geometry.box(width: 1.0, height: 1.0, depth: 1.0)
 
+  let lucy = case model.load_state {
+    Loading -> {
+      // Show a spinning cube while loading
+      let loading_cube =
+        scene.mesh(
+          id: "loading_cube",
+          geometry: {
+            let assert Ok(geometry) =
+              geometry.box(width: 1.0, height: 1.0, depth: 1.0)
+            geometry
+          },
+          material: {
+            let assert Ok(material) =
+              material.phong(
+                0x4ecdc4,
+                30.0,
+                option.None,
+                option.None,
+                option.None,
+                transparent: False,
+                opacity: 1.0,
+                alpha_test: 0.0,
+              )
+            material
+          },
+          transform: transform.at(position: vec3.Vec3(0.0, 0.0, 0.0)),
+          physics: option.None,
+        )
+      loading_cube
+    }
+
+    Failed(_error_msg) -> {
+      // Show a red cube to indicate error
+      let error_cube =
+        scene.mesh(
+          id: "error_cube",
+          geometry: {
+            let assert Ok(geometry) =
+              geometry.box(width: 1.0, height: 1.0, depth: 1.0)
+            geometry
+          },
+          material: {
+            let assert Ok(material) =
+              material.new()
+              |> material.with_color(0xff0000)
+              |> material.with_metalness(0.5)
+              |> material.with_roughness(0.5)
+              |> material.build()
+            material
+          },
+          transform: transform.at(position: vec3.Vec3(0.0, 0.0, 0.0)),
+          physics: option.None,
+        )
+      error_cube
+    }
+
+    Loaded(gltf_model) -> {
+      let model_node =
+        scene.model_3d(
+          id: "lucy",
+          object: gltf_model.scene,
+          transform: transform.at(position: model.ball.position)
+            |> transform.with_euler_rotation(vec3.Vec3(
+              0.0,
+              model.time *. model.ball.velocity /. 100.0,
+              0.0,
+            )),
+          animation: option.None,
+          physics: option.None,
+          // material: option.Some({
+          //   let assert Ok(material) =
+          //     material.new()
+          //     |> material.with_metalness(0.5)
+          //     |> material.with_roughness(0.5)
+          //     |> material.build()
+          //   material
+          // }),
+          material: option.None,
+        )
+      model_node
+    }
+  }
+
   scene.empty(id: "Scene", transform: transform.identity, children: [
     scene.camera(
       id: "camera",
@@ -354,7 +519,7 @@ fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
     scene.light(
       id: "ambient",
       light: {
-        let assert Ok(light) = light.ambient(color: 0xffffff, intensity: 0.5)
+        let assert Ok(light) = light.ambient(color: 0xffffff, intensity: 2.8)
         light
       },
       transform: transform.identity,
@@ -368,25 +533,25 @@ fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
       },
       transform: transform.at(position: vec3.Vec3(10.0, 10.0, 10.0)),
     ),
-    scene.mesh(
-      id: "sphere",
-      geometry: sphere_geom,
-      material: sphere_mat,
-      transform: transform.at(position: model.ball.position),
-      physics: option.None,
-    ),
-    scene.mesh(
-      id: "ground",
-      geometry: ground_geom,
-      material: ground_mat,
-      transform: transform.at(position: vec3.Vec3(0.0, -2.0, 0.0))
-        |> transform.with_euler_rotation(vec3.Vec3(
-          -1.57,
-          0.0,
-          model.time /. 1000.0,
-        )),
-      physics: option.None,
-    ),
+    // scene.mesh(
+    //   id: "sphere",
+    //   geometry: sphere_geom,
+    //   material: sphere_mat,
+    //   transform: transform.at(position: model.ball.position),
+    //   physics: option.None,
+    // ),
+    // scene.mesh(
+    //   id: "ground",
+    //   geometry: ground_geom,
+    //   material: ground_mat,
+    //   transform: transform.at(position: vec3.Vec3(0.0, -2.0, 0.0))
+    //     |> transform.with_euler_rotation(vec3.Vec3(
+    //       -1.57,
+    //       0.0,
+    //       model.time /. 1000.0,
+    //     )),
+    //   physics: option.None,
+    // ),
     scene.mesh(
       id: "p1",
       geometry: player_geom,
@@ -425,5 +590,6 @@ fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
         |> transform.with_scale(vec3.Vec3(20.0, 1.0, 1.0)),
       physics: option.None,
     ),
+    lucy,
   ])
 }

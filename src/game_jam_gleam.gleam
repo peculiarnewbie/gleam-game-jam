@@ -7,12 +7,10 @@ import gleam/list
 import gleam/option
 import gleam_community/maths
 import lustre
-import lustre/attribute.{attribute, class}
-import lustre/effect as effect_ui
-import lustre/element.{type Element}
-import lustre/element/html
 import lustre/event
+import pong/game
 import pong/levels
+import pong/ui
 import tiramisu
 import tiramisu/asset
 import tiramisu/background
@@ -25,7 +23,6 @@ import tiramisu/material
 import tiramisu/scene
 import tiramisu/spatial
 import tiramisu/transform
-import tiramisu/ui
 import vec/vec3
 
 pub type Direction {
@@ -52,8 +49,9 @@ pub type Ball {
   )
 }
 
-pub type Game {
-  Game(p1_score: Int, p2_score: Int)
+pub type PlayerMode {
+  Single
+  Multi
 }
 
 pub type Model {
@@ -62,10 +60,11 @@ pub type Model {
     p1: Player,
     p2: Player,
     ball: Ball,
-    game: Game,
+    game: game.Game,
     load_state: LoadState,
     camera_type: levels.CameraType,
     level: levels.Level,
+    mode: PlayerMode,
   )
 }
 
@@ -86,17 +85,9 @@ pub type LoadState {
   Failed(String)
 }
 
-pub type UIModel {
-  UIModel(state: Game)
-}
-
-pub type UIMsg {
-  UpdateScore(Int, Int)
-}
-
 pub fn main() -> Nil {
   let assert Ok(_) =
-    lustre.application(init_ui, update_ui, view_ui)
+    lustre.application(ui.init_ui, ui.update_ui, ui.view_ui)
     |> lustre.start("#app", Nil)
 
   tiramisu.run(
@@ -106,41 +97,6 @@ pub fn main() -> Nil {
     update:,
     view:,
   )
-}
-
-fn init_ui(_flags) {
-  // Register with Tiramisu to receive game state updates
-  #(UIModel(Game(0, 0)), ui.register_lustre())
-}
-
-fn update_ui(_: UIModel, msg: UIMsg) {
-  case msg {
-    UpdateScore(p1_score, p2_score) -> #(
-      UIModel(state: Game(p1_score, p2_score)),
-      effect_ui.none(),
-    )
-  }
-}
-
-fn view_ui(model: UIModel) -> Element(UIMsg) {
-  // UI overlay - positioned fixed to cover entire viewport and overlay Tiramisu canvas
-  html.div([class("fixed top-0 left-0 w-full h-full pointer-events-none")], [
-    html.div(
-      [
-        class(
-          "absolute top-5 left-5 p-4 bg-black/60 rounded-[5px] text-white font-sans pointer-events-auto",
-        ),
-      ],
-      [
-        html.div([class("mb-2.5")], [
-          element.text("P1 Score: " <> int.to_string(model.state.p1_score)),
-        ]),
-        html.div([class("mb-2.5")], [
-          element.text("P2 Score: " <> int.to_string(model.state.p2_score)),
-        ]),
-      ],
-    ),
-  ])
 }
 
 fn init(
@@ -162,7 +118,7 @@ fn init(
     Model(
       time: 0.0,
       p1: Player(id: P1, position: 0.0, speed: 1.0),
-      p2: Player(id: P2, position: 0.0, speed: 1.0),
+      p2: Player(id: P2, position: 0.0, speed: 0.5),
       ball: Ball(
         position: vec3.Vec3(0.0, 0.0, 0.0),
         rotation: 0.0,
@@ -170,10 +126,11 @@ fn init(
         direction: vec3.Vec3(1.0, 0.0, 0.0),
         owner: P1,
       ),
-      game: Game(p1_score: 0, p2_score: 0),
+      game: game.Game(p1_score: 0, p2_score: 0),
       load_state: Loading,
       level: levels.get_random_level(),
       camera_type: levels.Static,
+      mode: Single,
     ),
     effect.batch([effect.tick(Tick), load_effect]),
     option.None,
@@ -234,17 +191,30 @@ fn update(
         }
         _, _ -> model.p1
       }
-      let new_p2 = case
-        input.is_key_pressed(ctx.input, input.ArrowUp),
-        input.is_key_pressed(ctx.input, input.ArrowDown)
-      {
-        True, False -> {
-          player_move(model.p2, Backward)
+      let new_p2 = case model.mode {
+        Single -> {
+          let p2_position = vec3.Vec3(10.0, 0.0, 5.0 *. model.p2.position)
+          let diff = model.ball.position.z -. p2_position.z
+          case diff <. -1.0, diff >. 1.0 {
+            True, False -> player_move(model.p2, Backward)
+            False, True -> player_move(model.p2, Forward)
+            _, _ -> model.p2
+          }
         }
-        False, True -> {
-          player_move(model.p2, Forward)
+        Multi -> {
+          case
+            input.is_key_pressed(ctx.input, input.ArrowUp),
+            input.is_key_pressed(ctx.input, input.ArrowDown)
+          {
+            True, False -> {
+              player_move(model.p2, Backward)
+            }
+            False, True -> {
+              player_move(model.p2, Forward)
+            }
+            _, _ -> model.p2
+          }
         }
-        _, _ -> model.p2
       }
 
       let p1_position = vec3.Vec3(-10.0, 0.0, 5.0 *. model.p1.position)
@@ -325,15 +295,15 @@ fn update(
           rotation:,
         )
 
-      let score1_pos = vec3.Vec3(14.0, 0.0, 0.0)
+      let score1_pos = vec3.Vec3(12.0, 0.0, 0.0)
       let score1_bounds =
         score1_pos
-        |> spatial.collider_box_from_center(vec3.Vec3(0.5, 0.5, 20.5))
+        |> spatial.collider_box_from_center(vec3.Vec3(0.5, 0.5, 200.0))
 
-      let score2_pos = vec3.Vec3(-14.0, 0.0, 0.0)
+      let score2_pos = vec3.Vec3(-12.0, 0.0, 0.0)
       let score2_bounds =
         score2_pos
-        |> spatial.collider_box_from_center(vec3.Vec3(0.5, 0.5, 20.5))
+        |> spatial.collider_box_from_center(vec3.Vec3(0.5, 0.5, 200.0))
 
       let intersect_s1 = spatial.collider_intersects(score1_bounds, ball_bounds)
       let intersect_s2 = spatial.collider_intersects(score2_bounds, ball_bounds)
@@ -343,7 +313,7 @@ fn update(
         intersect_s2
       {
         True, _ -> #(
-          Game(model.game.p1_score + 1, model.game.p2_score),
+          game.Game(model.game.p1_score + 1, model.game.p2_score),
           Ball(
             owner: P2,
             direction: vec3.Vec3(-1.0, 0.0, 0.0),
@@ -355,7 +325,7 @@ fn update(
           0.0,
         )
         _, True -> #(
-          Game(model.game.p1_score, model.game.p2_score + 1),
+          game.Game(model.game.p1_score, model.game.p2_score + 1),
           Ball(
             owner: P1,
             direction: vec3.Vec3(1.0, 0.0, 0.0),
@@ -386,7 +356,7 @@ fn update(
         ),
         effect.batch([
           effect.tick(Tick),
-          ui.dispatch_to_lustre(UpdateScore(game.p1_score, game.p2_score)),
+          ui.dispatch(game.Game(game.p1_score, game.p2_score)),
         ]),
         option.None,
       )
@@ -421,7 +391,7 @@ fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
   let assert Ok(cam) =
     camera.perspective(field_of_view: 95.0, near: 0.1, far: 1000.0)
   let assert Ok(sphere_mat) =
-    material.new() |> material.with_color(0x0066ff) |> material.build
+    material.new() |> material.with_color(0xffffff) |> material.build
   let assert Ok(player1_mat) =
     material.new() |> material.with_color(0x448080) |> material.build
   let assert Ok(player2_mat) =

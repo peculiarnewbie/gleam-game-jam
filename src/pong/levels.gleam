@@ -3,7 +3,7 @@ import gleam/option
 import gleam_community/maths
 import tiramisu/geometry
 import tiramisu/transform
-import vec/vec3
+import vec/vec3.{type Vec3}
 
 pub type Level {
   Level(player_geom: geometry.Geometry)
@@ -20,6 +20,7 @@ pub type CameraType {
   Rotate
   Revolve
   Bounce
+  Follow
 }
 
 pub fn get_camera_type(old_type: CameraType) {
@@ -27,6 +28,7 @@ pub fn get_camera_type(old_type: CameraType) {
     0 -> Rotate
     1 -> Revolve
     2 -> Bounce
+    3 -> Follow
     _ -> Static
   }
 
@@ -36,7 +38,7 @@ pub fn get_camera_type(old_type: CameraType) {
   }
 }
 
-pub fn get_camera(cam: CameraType, time: Float) {
+pub fn get_camera(cam: CameraType, time: Float, ball_position: Vec3(Float)) {
   case cam {
     Static -> {
       transform.at(position: vec3.Vec3(0.0, 10.0, 0.0))
@@ -64,6 +66,10 @@ pub fn get_camera(cam: CameraType, time: Float) {
         10.0 +. maths.sin(time /. 1000.0) *. 5.0,
         0.0,
       ))
+      |> transform.with_euler_rotation(vec3.Vec3(-1.57, 0.0, 0.0))
+    }
+    Follow -> {
+      transform.at(position: vec3.Vec3(ball_position.x, 10.0, ball_position.z))
       |> transform.with_euler_rotation(vec3.Vec3(-1.57, 0.0, 0.0))
     }
   }

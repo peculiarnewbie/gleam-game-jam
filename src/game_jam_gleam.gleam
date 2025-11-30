@@ -65,13 +65,8 @@ pub type Model {
     camera_type: levels.CameraType,
     level: levels.Level,
     mode: PlayerMode,
+    state: game.GameState,
   )
-}
-
-pub type Msg {
-  Tick
-  ModelLoaded(asset.FBXData)
-  LoadingFailed(asset.LoadError)
 }
 
 pub type Action {
@@ -101,15 +96,15 @@ pub fn main() -> Nil {
 
 fn init(
   _ctx: tiramisu.Context(String),
-) -> #(Model, Effect(Msg), option.Option(_)) {
+) -> #(Model, Effect(game.Msg), option.Option(_)) {
   // Insert enemies
   //
   let load_effect =
     effect.from_promise(
       promise.map(asset.load_fbx("lucy.fbx", ""), fn(result) {
         case result {
-          Ok(data) -> ModelLoaded(data)
-          Error(error) -> LoadingFailed(error)
+          Ok(data) -> game.ModelLoaded(data)
+          Error(error) -> game.LoadingFailed(error)
         }
       }),
     )
@@ -123,16 +118,18 @@ fn init(
         position: vec3.Vec3(0.0, 0.0, 0.0),
         rotation: 0.0,
         velocity: 0.2,
-        direction: vec3.Vec3(1.0, 0.0, 0.0),
-        owner: P1,
+        direction: vec3.Vec3(-1.0, 0.0, 0.0),
+        owner: P2,
       ),
       game: game.Game(p1_score: 0, p2_score: 0),
       load_state: Loading,
       level: levels.get_random_level(),
       camera_type: levels.Static,
       mode: Single,
+      state: game.Start,
     ),
-    effect.batch([effect.tick(Tick), load_effect]),
+    // effect.batch([effect.tick(Tick), load_effect]),
+    load_effect,
     option.None,
   )
 }
@@ -174,11 +171,11 @@ fn ball_bounce(
 
 fn update(
   model: Model,
-  msg: Msg,
+  msg: game.Msg,
   ctx: tiramisu.Context(String),
-) -> #(Model, Effect(Msg), option.Option(_)) {
+) -> #(Model, Effect(game.Msg), option.Option(_)) {
   case msg {
-    Tick -> {
+    game.Tick -> {
       let new_p1 = case
         input.is_key_pressed(ctx.input, input.KeyW),
         input.is_key_pressed(ctx.input, input.KeyS)
@@ -355,13 +352,13 @@ fn update(
           camera_type: new_camera_type,
         ),
         effect.batch([
-          effect.tick(Tick),
+          effect.tick(game.Tick),
           ui.dispatch(game.Game(game.p1_score, game.p2_score)),
         ]),
         option.None,
       )
     }
-    ModelLoaded(data) -> {
+    game.ModelLoaded(data) -> {
       let animation_count = data.animations |> list.length()
       io.println(
         "Loaded GLTF model with "
@@ -371,7 +368,7 @@ fn update(
       #(Model(..model, load_state: Loaded(data)), effect.none(), option.None)
     }
 
-    LoadingFailed(error) -> {
+    game.LoadingFailed(error) -> {
       let error_msg = case error {
         asset.LoadError(msg) -> "Load error: " <> msg
         asset.InvalidUrl(url) -> "Invalid URL: " <> url
@@ -381,6 +378,22 @@ fn update(
       #(
         Model(..model, load_state: Failed(error_msg)),
         effect.none(),
+        option.None,
+      )
+    }
+
+    game.PlaySingle -> {
+      #(
+        Model(..model, state: game.Playing, mode: Single),
+        effect.tick(game.Tick),
+        option.None,
+      )
+    }
+
+    game.PlayMulti -> {
+      #(
+        Model(..model, state: game.Playing, mode: Multi),
+        effect.tick(game.Tick),
         option.None,
       )
     }
@@ -474,7 +487,8 @@ fn view(model: Model, _ctx: tiramisu.Context(String)) -> scene.Node(String) {
     }
   }
 
-  let cam_transform = levels.get_camera(model.camera_type, model.time)
+  let cam_transform =
+    levels.get_camera(model.camera_type, model.time, model.ball.position)
 
   scene.empty(id: "Scene", transform: transform.identity, children: [
     scene.camera(
